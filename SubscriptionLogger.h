@@ -19,7 +19,7 @@ public:
     SubscriptionLogger();
     bool registerStream(Print &stream, uint8_t logLevel = LOGGER_LEVEL_INFO);
     void logDetails(uint8_t level, const char *file, int line, const char *format, ...);
-    void logText(uint8_t level, const char *file, int line, const char *format, ...);
+    void logText(uint8_t level, const char *format, ...);
 
     void setLogLevel(uint8_t level);
 
@@ -34,4 +34,6 @@ private:
     StreamInfo *firstStream = nullptr, *lastStream = nullptr;
 
     uint8_t logLevel = LOGGER_LEVEL_NONE;
+
+    void writeToStreams(uint8_t level, const char *buffer, int len);
 };

@@ -37,7 +37,8 @@ void SubscriptionLogger::writeToStreams(uint8_t level, const char *buffer, int l
             s = s->next;
         } while (s != nullptr);
     } else {
-        Serial.println("No streams registered for logging!");
+        Serial.print("FALLBACK:");
+        Serial.write(buffer, len);
     }
 }
 

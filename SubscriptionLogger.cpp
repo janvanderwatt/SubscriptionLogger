@@ -46,94 +46,86 @@ void SubscriptionLogger::writeToStreams(uint8_t level, const char *buffer, int l
 // Log text if the current golbabl logging level is low enough
 // --------------------------------------------------------------------------------------------------------
 void SubscriptionLogger::logText(uint8_t level, const char *format, ...) {
+    if (level < this->logLevel) return;
+
     char logger_buffer[64];
+    const size_t buf_sz = sizeof(logger_buffer);
 
-    if (level >= this->logLevel) {
-        char *temp = logger_buffer;
-        va_list arg;
-        va_list copy;
-        va_start(arg, format);
-        va_copy(copy, arg);
-        int len = vsnprintf(temp, sizeof(logger_buffer), format, copy);
-        va_end(copy);
-        if (len < 0) {
-            va_end(arg);
-            return;
-        };
-        if (len >= sizeof(logger_buffer)) {
-            temp = (char *)malloc(len + 1);
-            if (temp == NULL) {
-                va_end(arg);
-                return;
-            }
-            len = vsnprintf(temp, len + 2, format, arg);
-        }
-        va_end(arg);
+    va_list ap;
+    va_start(ap, format);
 
-        writeToStreams(level, temp, len);
+    // determine required length
+    va_list ap_copy;
+    va_copy(ap_copy, ap);
+    int needed = vsnprintf(NULL, 0, format, ap_copy);
+    va_end(ap_copy);
+    if (needed < 0) { va_end(ap); return; }
 
-        if (temp != logger_buffer) {
-            free(temp);
-        }
+    char *out = logger_buffer;
+    bool allocated = false;
+    size_t out_sz = buf_sz;
+
+    if ((size_t)needed + 1 > buf_sz) {
+        out_sz = (size_t)needed + 1;
+        out = (char *)malloc(out_sz);
+        if (!out) { va_end(ap); return; }
+        allocated = true;
     }
+
+    // actually format into the chosen buffer, pass the real buffer size
+    int written = vsnprintf(out, out_sz, format, ap);
+    va_end(ap);
+    if (written < 0) {
+        if (allocated) free(out);
+        return;
+    }
+
+    // write exact number of bytes (exclude terminating NUL)
+    writeToStreams(level, out, written);
+
+    if (allocated) free(out);
 }
 
 void SubscriptionLogger::logDetails(uint8_t level, const char *file, int line, const char *format, ...) {
-    // Serial.printf("LOGDETAILS: level=%d, logLevel=%d, file=%s, line=%d, format=%s\n", level, this->logLevel, file, line, format);
-    if (level >= this->logLevel) {
-        // Prepare the log prefix
-        char logger_buffer[128];
-        const char *level_str = "VDIWE", *format_prefix = "[%6d][%c][%s:%d]";
+    if (level < this->logLevel) return;
 
-        char *temp = logger_buffer;
-        int len_prefix = snprintf(logger_buffer, sizeof(logger_buffer), format_prefix, millis(), level_str[level], file, line);
+    const char *level_str = "VDIWE";
+    const char *format_prefix = "[%6d][%c][%s:%d]";
+    char prefix_buf[64];
 
-        if (len_prefix < 0) {
-            return;
-        }
+    // Get prefix length (snprintf returns required length excluding NUL)
+    int prefix_len = snprintf(prefix_buf, sizeof(prefix_buf), format_prefix, millis(), level_str[level], file, line);
+    if (prefix_len < 0) return;
 
-        va_list arg;
-        va_list copy;
-        va_start(arg, format);
-        va_copy(copy, arg);
-        int len_log;
-        if (len_prefix < sizeof(logger_buffer)) {
-            // The prefix fit into the buffer. Try our luck, attempt to add the log after the prefix.
-            len_log = vsnprintf(logger_buffer + len_prefix, sizeof(logger_buffer) - len_prefix, format, copy);
-        } else {
-            // The prefix did not fit into the buffer. Get the length of the log without writing anything in memory.
-            len_log = vsnprintf(NULL, 0, format, copy);
-        }
-        va_end(copy);
-        if (len_log < 0) {
-            va_end(arg);
-            return;
-        };
+    // Determine formatted message length using a copy of the va_list
+    va_list ap;
+    va_start(ap, format);
+    va_list ap_copy;
+    va_copy(ap_copy, ap);
+    int msg_len = vsnprintf(NULL, 0, format, ap_copy);
+    va_end(ap_copy);
+    if (msg_len < 0) { va_end(ap); return; }
 
-        // Check if the prefix and the log did fit in the buffer
-        int len_buffer = len_prefix + len_log;
-        if (len_buffer > sizeof(logger_buffer)) {
-            // No, it didn't, so allocate memory for it.
-            temp = (char *)malloc(len_buffer);
-            if (temp == NULL) {
-                return;
-            }
-            if (len_prefix < sizeof(logger_buffer)) {
-                // If the prefix fit into the original buffer, it's faster to just copy it
-                memcpy(temp, logger_buffer, len_prefix);
-            } else {
-                // The prefix string was too long, so write it again
-                snprintf(temp, len_buffer, format_prefix, millis(), level_str[level], file, line);
-            }
-            // Write the log
-            vsnprintf(temp + len_prefix, len_log, format, arg);
-        }
-        va_end(arg);
+    // Allocate total buffer (prefix + message + NUL)
+    int total_len = prefix_len + msg_len;
+    char *out = (char *)malloc((size_t)total_len + 1);
+    if (!out) { va_end(ap); return; }
 
-        writeToStreams(level, temp, len_buffer);
-
-        if (temp != logger_buffer) {
-            free(temp);
-        }
+    // Write prefix: if the temporary prefix_buf was truncated, reprint into out
+    if (prefix_len < (int)sizeof(prefix_buf)) {
+        memcpy(out, prefix_buf, prefix_len);
+    } else {
+        // prefix was truncated in prefix_buf, re-snprintf fully into out
+        int r = snprintf(out, prefix_len + 1, format_prefix, millis(), level_str[level], file, line);
+        if (r < 0) { free(out); va_end(ap); return; }
     }
+
+    // Write formatted message (provide msg_len+1 as buffer size to include terminating NUL)
+    int written = vsnprintf(out + prefix_len, (size_t)msg_len + 1, format, ap);
+    va_end(ap);
+    if (written < 0) { free(out); return; }
+
+    // Send exactly prefix_len + msg_len bytes (no extra NUL)
+    writeToStreams(level, out, prefix_len + msg_len);
+    free(out);
 }

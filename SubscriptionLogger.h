@@ -1,6 +1,12 @@
 #pragma once
 
+#if defined(ARDUINO)
 #include <Arduino.h>
+#endif // ARDUINO
+
+#if defined(ARDUINO_PC)
+#include <ArduinoPC.h>
+#endif // ARDUINO_PC
 
 #define LOGGER_LEVEL_VERBOSE 0
 #define LOGGER_LEVEL_DEBUG 1

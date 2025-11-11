@@ -38,7 +38,7 @@ void SubscriptionLogger::writeToStreams(uint8_t level, const char *buffer, int l
         } while (s != nullptr);
     } else {
         Serial.print("FALLBACK:");
-        Serial.write(buffer, len);
+        Serial.write((const uint8_t*)buffer, len);
     }
 }
 
